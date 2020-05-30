@@ -1,9 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Security.Cryptography.X509Certificates;
-using System.Text;
 using System.Threading.Tasks;
 using Discord.Commands;
 using Discord.WebSocket;
@@ -15,8 +12,8 @@ namespace TravisBot
 {
     public class CustomCommandService
     {
-        private CommandService _commandService;
-        public CustomCommandService(IConfiguration configuration, IServiceProvider services)
+        private readonly CommandService _commandService;
+        public CustomCommandService(IServiceProvider services)
         {
             _commandService = services.GetRequiredService<CommandService>();
         }
@@ -25,57 +22,109 @@ namespace TravisBot
         {
             string commandText = context.Message.Content[1..];
 
-            CustomCommandObject command = FindCommand(commandText, ((SocketCommandContext)context).Guild);
+            CustomCommandObject command = FindCommand(commandText, context);
             if (command == null) return false;
 
             await context.Channel.SendMessageAsync(command.Output);
             return true;
         }
 
-        public CustomCommandObject FindCommand(string command, SocketGuild guild)
+        public CustomCommandObject FindCommand(string command, ICommandContext context)
         {
             CustomCommandObject ret = null;
-            using (LiteDatabase db = new LiteDatabase(@$"db\{guild.Id.ToString()}.db"))
-            {
-                ILiteCollection<CustomCommandObject> collection = db.GetCollection<CustomCommandObject>("customCommands");
 
-                if(collection.Count() > 0)
-                {
-                    if (collection.Query().Where(x => x.Command == command).Exists())
-                    {
-                        ret = collection.Query().Where(x => x.Command == command).First();
-                    }
-                }
+            using LiteDatabase db = new LiteDatabase(Path.Combine("db", $"{context.Guild.Id}.db"));
+
+            ILiteCollection<CustomCommandObject> collection = db.GetCollection<CustomCommandObject>("customCommands");
+
+            if (collection.Count() == 0) return ret;
+
+            if (collection.Query().Where(x => x.Command == command).Exists())
+            {
+                ret = collection.Query().Where(x => x.Command == command).First();
             }
 
             return ret;
         }
 
-        public bool RegisterCommand(string command, string output, SocketGuild guild)
+        public CommandServiceResponse RegisterCommand(string command, string output, ICommandContext context)
         {
-            if (_commandService.Commands.Any(x => x.Name == command)) return false;
+            if (_commandService.Commands.Any(x => x.Name == command)) return CommandServiceResponse.AlreadyExists;
 
-            using (LiteDatabase db = new LiteDatabase(@$"db\{guild.Id.ToString()}.db"))
-            {
-                ILiteCollection<CustomCommandObject> collection = db.GetCollection<CustomCommandObject>("customCommands");
+            using LiteDatabase db = new LiteDatabase(Path.Combine("db", $"{context.Guild.Id}.db"));
 
-                if (collection.Query().Where(x => x.Command == command).Exists()) return false;
+            ILiteCollection<CustomCommandObject> collection = db.GetCollection<CustomCommandObject>("customCommands");
 
-                CustomCommandObject commandObject = new CustomCommandObject { Command = command, Output = output };
+            if (collection.Query().Where(x => x.Command == command).Exists()) return CommandServiceResponse.AlreadyExists;
 
-                collection.Insert(commandObject);
+            CustomCommandObject commandObject = new CustomCommandObject { Command = command, Output = output, RegisteredBy = context.User.Id };
 
-                collection.EnsureIndex(x => x.Command);
+            collection.Insert(commandObject);
 
-            }
+            collection.EnsureIndex(x => x.Command);
 
-            return true;
+            return CommandServiceResponse.Success;
+        }
+
+        public CommandServiceResponse EditCommand(string command, string output, ICommandContext context)
+        {
+            if (_commandService.Commands.Any(x => x.Name == command)) return CommandServiceResponse.NotOwner;
+
+            using LiteDatabase db = new LiteDatabase(Path.Combine("db", $"{context.Guild.Id}.db"));
+
+            ILiteCollection<CustomCommandObject> collection = db.GetCollection<CustomCommandObject>("customCommands");
+
+            if (!collection.Query().Where(x => x.Command == command).Exists()) return CommandServiceResponse.NotFound;
+
+            CustomCommandObject commandObject = collection.Query().Where(x => x.Command == command).First();
+
+            if (commandObject.RegisteredBy != context.User.Id) return CommandServiceResponse.NotOwner;
+
+            commandObject.Output = output;
+
+            collection.Update(commandObject);
+
+            collection.EnsureIndex(x => x.Command);
+
+            return CommandServiceResponse.Success;
+        }
+
+        public CommandServiceResponse DeleteCommand(string command, ICommandContext context)
+        {
+            if (_commandService.Commands.Any(x => x.Name == command)) return CommandServiceResponse.NotOwner;
+
+            using LiteDatabase db = new LiteDatabase(Path.Combine("db",$"{context.Guild.Id}.db"));
+
+            ILiteCollection<CustomCommandObject> collection = db.GetCollection<CustomCommandObject>("customCommands");
+
+            if (!collection.Query().Where(x => x.Command == command).Exists()) return CommandServiceResponse.NotFound;
+
+            CustomCommandObject commandObject = collection.Query().Where(x => x.Command == command).First();
+
+            if (commandObject.RegisteredBy != context.User.Id) return CommandServiceResponse.NotOwner;
+
+            collection.Delete(commandObject.ID);
+
+            collection.EnsureIndex(x => x.Command);
+
+            return CommandServiceResponse.Success;
         }
     }
 
     public class CustomCommandObject
     {
+        public int ID { get; set; }
         public string Command { get; set; }
         public string Output { get; set; }
+        public ulong RegisteredBy { get; set; }
+    }
+
+    public enum CommandServiceResponse
+    {
+        NotFound = 0,
+        Found = 1,
+        NotOwner = 2,
+        AlreadyExists = 3,
+        Success = 4
     }
 }

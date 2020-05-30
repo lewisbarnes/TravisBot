@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Discord.WebSocket;
@@ -11,15 +9,15 @@ using Microsoft.Extensions.Logging;
 
 namespace TravisBot
 {
-    
+
     public class DiscordSocketService : IHostedService
     {
         private readonly ILogger _logger;
         private readonly IHostApplicationLifetime _lifetime;
         private DiscordSocketClient _discordClient;
-        private string _botToken;
-        private IServiceProvider _services;
-        private CommandHandlingService _commandHandlingService;
+        private readonly string _botToken;
+        private readonly IServiceProvider _services;
+        private readonly CommandHandlingService _commandHandlingService;
 
         public DiscordSocketService(ILogger<DiscordSocketService> logger, IHostApplicationLifetime lifetime, IConfiguration configuration, IServiceProvider services)
         {
@@ -46,7 +44,7 @@ namespace TravisBot
             _discordClient = _services.GetRequiredService<DiscordSocketClient>();
 
             _discordClient.Log += OnClientLog;
-            _discordClient.MessageReceived += OnMessageReceived;
+            _discordClient.MessageReceived += _commandHandlingService.MessageReceivedAsync;
 
             _discordClient.LoginAsync(Discord.TokenType.Bot, _botToken).Wait();
             _discordClient.StartAsync().Wait();
@@ -64,15 +62,8 @@ namespace TravisBot
                 _ => LogLevel.Information
             };
 
-            _logger.Log(severity, $"{logMessage.Source.PadRight(10)}{logMessage.Message}");
+            _logger.Log(severity, $"{logMessage.Source.PadRight(15)}{logMessage.Message}");
             return Task.CompletedTask;
-        }
-
-        private async Task OnMessageReceived(SocketMessage message)
-        {
-            if (message.Author.IsBot) return;
-
-            await _commandHandlingService.MessageReceivedAsync(message);
         }
     }
 }

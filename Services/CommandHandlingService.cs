@@ -1,15 +1,12 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Reflection;
-using System.Text;
 using System.Threading.Tasks;
+using Discord;
 using Discord.Commands;
 using Discord.WebSocket;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Discord;
 using Microsoft.Extensions.Logging;
-using System.Linq;
 
 namespace TravisBot
 {
@@ -20,13 +17,14 @@ namespace TravisBot
         private readonly CommandService _commandService;
         private readonly DiscordSocketClient _client;
         private readonly CustomCommandService _customCommandService;
-        private string _commandPrefix;
-        private ILogger _logger;
+        private readonly string _commandPrefix;
+        private readonly ILogger _logger;
 
         public CommandHandlingService(IServiceProvider services)
         {
             _services = services;
             _logger = _services.GetRequiredService<ILogger<CommandHandlingService>>();
+            _client = _services.GetRequiredService<DiscordSocketClient>();
 
             _configuration = _services.GetRequiredService<IConfiguration>();
             _customCommandService = _services.GetRequiredService<CustomCommandService>();
@@ -69,7 +67,7 @@ namespace TravisBot
             if (result.IsSuccess)
                 return;
 
-            _logger.LogWarning($"{context.User.Id}/{context.User.Username}: {result.ToString()}");
+            _logger.LogWarning($"{context.User.Id}/{context.User.Username}: {result}");
 
             await context.Channel.SendMessageAsync($"error: {result}");
         }
